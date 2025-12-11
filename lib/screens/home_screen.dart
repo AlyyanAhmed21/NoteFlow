@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import '../providers/document_provider.dart';
+import '../providers/theme_provider.dart';
 import '../widgets/document_tile.dart';
 import 'dictation_screen.dart';
 import 'document_detail_screen.dart';
@@ -105,6 +106,15 @@ class _HomeScreenState extends State<HomeScreen> {
                               ),
                             ],
                           ),
+                        ),
+                        // Settings button
+                        IconButton(
+                          onPressed: _showThemeSelector,
+                          icon: Icon(
+                            Icons.palette_outlined,
+                            color: colorScheme.onSurfaceVariant,
+                          ),
+                          tooltip: 'Theme',
                         ),
                         // Search toggle button
                         IconButton(
@@ -420,5 +430,77 @@ class _HomeScreenState extends State<HomeScreen> {
       // Refresh documents when returning
       context.read<DocumentProvider>().loadDocuments();
     });
+  }
+
+  void _showThemeSelector() {
+    final themeProvider = context.read<ThemeProvider>();
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text(
+                'Choose Theme',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ...AppThemeMode.values.map((mode) {
+                final isSelected = themeProvider.themeMode == mode;
+                return ListTile(
+                  leading: Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      color: isSelected 
+                          ? colorScheme.primaryContainer 
+                          : colorScheme.surfaceContainerHighest,
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      themeProvider.getThemeIcon(mode),
+                      color: isSelected 
+                          ? colorScheme.primary 
+                          : colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                  title: Text(
+                    themeProvider.getThemeName(mode),
+                    style: TextStyle(
+                      fontWeight: isSelected ? FontWeight.bold : FontWeight.normal,
+                    ),
+                  ),
+                  trailing: isSelected 
+                      ? Icon(Icons.check, color: colorScheme.primary)
+                      : null,
+                  onTap: () {
+                    themeProvider.setThemeMode(mode);
+                    Navigator.pop(context);
+                  },
+                );
+              }),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 }
