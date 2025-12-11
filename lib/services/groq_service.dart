@@ -3,18 +3,17 @@ import 'package:flutter_dotenv/flutter_dotenv.dart';
 
 /// Service for interacting with the Groq API for AI summarization.
 /// 
-/// Uses the Groq API with llama3-70b-8192 model to generate
+/// Uses the Groq API with llama-3.3-70b-versatile model to generate
 /// crisp bullet summaries with action items from transcripts.
 class GroqService {
-  static const String _baseUrl = 'https://api.groq.com/openai/v1/chat/completions';
-  static const String _model = 'llama3-70b-8192';
+  static const String _baseUrl = 'https://api.groq.com/openai/v1';
+  static const String _model = 'llama-3.1-8b-instant';
   
   late final Dio _dio;
   String? _apiKey;
 
   GroqService() {
     _dio = Dio(BaseOptions(
-      baseUrl: _baseUrl,
       connectTimeout: const Duration(seconds: 30),
       receiveTimeout: const Duration(seconds: 60),
     ));
@@ -45,7 +44,7 @@ class GroqService {
 
     try {
       final response = await _dio.post(
-        '',
+        '$_baseUrl/chat/completions',
         options: Options(
           headers: {
             'Authorization': 'Bearer $_apiKey',
@@ -57,29 +56,11 @@ class GroqService {
           'messages': [
             {
               'role': 'system',
-              'content': '''You are a helpful assistant that creates concise, well-organized summaries.
-
-Given a transcript, create:
-1. A crisp bullet-point summary (3-5 key points)
-2. 3 actionable items based on the content
-
-Format your response as:
-
-## Summary
-• [Key point 1]
-• [Key point 2]
-• [Key point 3]
-
-## Action Items
-1. [Action 1]
-2. [Action 2]
-3. [Action 3]
-
-Keep the summary concise and focused on the most important information.'''
+              'content': 'You are a helpful assistant that creates concise, well-organized summaries. Given a transcript, create: 1) A crisp bullet-point summary with 3-5 key points, and 2) 3 actionable items based on the content. Format with "Summary:" followed by bullet points, then "Action Items:" followed by numbered items. Keep it concise.'
             },
             {
               'role': 'user',
-              'content': 'Please summarize the following transcript:\n\n$transcript'
+              'content': transcript
             }
           ],
           'temperature': 0.7,
@@ -99,7 +80,11 @@ Keep the summary concise and focused on the most important information.'''
         throw Exception('API request failed with status: ${response.statusCode}');
       }
     } on DioException catch (e) {
-      if (e.response?.statusCode == 401) {
+      if (e.response?.statusCode == 400) {
+        // Log the actual error for debugging
+        final errorData = e.response?.data;
+        throw Exception('Bad request: ${errorData?['error']?['message'] ?? 'Invalid request format'}');
+      } else if (e.response?.statusCode == 401) {
         throw Exception('Invalid API key. Please check your Groq API key.');
       } else if (e.response?.statusCode == 429) {
         throw Exception('Rate limit exceeded. Please try again later.');
