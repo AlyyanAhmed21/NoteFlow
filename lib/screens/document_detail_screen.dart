@@ -9,7 +9,7 @@ import '../providers/document_provider.dart';
 /// Screen for viewing and managing a single document.
 /// 
 /// Features:
-/// - View full transcript
+/// - View/edit full transcript
 /// - View/generate AI summary
 /// - Edit title
 /// - Delete document
@@ -31,7 +31,10 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
   bool _isGeneratingSummary = false;
   String? _summaryError;
   final TextEditingController _titleController = TextEditingController();
+  final TextEditingController _transcriptController = TextEditingController();
   bool _isEditingTitle = false;
+  bool _isEditingTranscript = false;
+  bool _hasUnsavedChanges = false;
 
   @override
   void initState() {
@@ -44,17 +47,24 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
     _document = provider.getDocument(widget.documentId);
     if (_document != null) {
       _titleController.text = _document!.title;
+      _transcriptController.text = _document!.transcript;
     }
   }
 
   @override
   void dispose() {
     _titleController.dispose();
+    _transcriptController.dispose();
     super.dispose();
   }
 
   Future<void> _generateSummary() async {
     if (_document == null) return;
+
+    // Save any pending transcript changes first
+    if (_hasUnsavedChanges) {
+      await _saveTranscript();
+    }
 
     setState(() {
       _isGeneratingSummary = true;
@@ -94,6 +104,46 @@ class _DocumentDetailScreenState extends State<DocumentDetailScreen> {
 
     setState(() {
       _isEditingTitle = false;
+    });
+  }
+
+  Future<void> _saveTranscript() async {
+    if (_document == null) return;
+    
+    final newTranscript = _transcriptController.text.trim();
+    if (newTranscript.isEmpty) {
+      _transcriptController.text = _document!.transcript;
+      return;
+    }
+
+    if (newTranscript != _document!.transcript) {
+      await context.read<DocumentProvider>().updateTranscript(_document!.id, newTranscript);
+      _loadDocument();
+      
+      if (mounted) {
+        ScaffoldMessenger.of(context).showSnackBar(
+          const SnackBar(content: Text('Note saved')),
+        );
+      }
+    }
+
+    setState(() {
+      _isEditingTranscript = false;
+      _hasUnsavedChanges = false;
+    });
+  }
+
+  void _startEditingTranscript() {
+    setState(() {
+      _isEditingTranscript = true;
+    });
+  }
+
+  void _cancelEditingTranscript() {
+    _transcriptController.text = _document!.transcript;
+    setState(() {
+      _isEditingTranscript = false;
+      _hasUnsavedChanges = false;
     });
   }
 
@@ -171,21 +221,54 @@ ${_document!.summary != null ? '---\nSummary:\n${_document!.summary}' : ''}
       );
     }
 
-    return Scaffold(
-      backgroundColor: colorScheme.surface,
-      body: CustomScrollView(
-        slivers: [
-          // App bar
-          SliverAppBar(
-            expandedHeight: 160,
-            pinned: true,
-            backgroundColor: colorScheme.surface,
-            surfaceTintColor: Colors.transparent,
-            leading: IconButton(
-              onPressed: () => Navigator.pop(context),
-              icon: const Icon(Icons.arrow_back),
+    return PopScope(
+      canPop: !_hasUnsavedChanges,
+      onPopInvokedWithResult: (didPop, result) async {
+        if (!didPop && _hasUnsavedChanges) {
+          final shouldSave = await showDialog<bool>(
+            context: context,
+            builder: (context) => AlertDialog(
+              title: const Text('Unsaved Changes'),
+              content: const Text('Would you like to save your changes before leaving?'),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(context, false),
+                  child: const Text('Discard'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(context, true),
+                  child: const Text('Save'),
+                ),
+              ],
             ),
-            actions: [
+          );
+          
+          if (shouldSave == true) {
+            await _saveTranscript();
+          }
+          if (mounted) {
+            Navigator.pop(context);
+          }
+        }
+      },
+      child: Scaffold(
+        backgroundColor: colorScheme.surface,
+        appBar: AppBar(
+          backgroundColor: colorScheme.surface,
+          title: Text(_isEditingTranscript ? 'Editing Note' : 'Note'),
+          actions: [
+            if (_isEditingTranscript) ...[
+              IconButton(
+                onPressed: _cancelEditingTranscript,
+                icon: const Icon(Icons.close),
+                tooltip: 'Cancel',
+              ),
+              IconButton(
+                onPressed: _saveTranscript,
+                icon: const Icon(Icons.check),
+                tooltip: 'Save',
+              ),
+            ] else ...[
               IconButton(
                 onPressed: _copyToClipboard,
                 icon: const Icon(Icons.copy),
@@ -219,272 +302,285 @@ ${_document!.summary != null ? '---\nSummary:\n${_document!.summary}' : ''}
                 ],
               ),
             ],
-            flexibleSpace: FlexibleSpaceBar(
-              background: Container(
-                padding: EdgeInsets.only(
-                  top: MediaQuery.of(context).padding.top + 56,
-                  left: 20,
-                  right: 20,
-                  bottom: 16,
-                ),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisAlignment: MainAxisAlignment.end,
-                  children: [
-                    // Title (editable)
-                    GestureDetector(
-                      onTap: () {
-                        setState(() {
-                          _isEditingTitle = true;
-                        });
-                      },
-                      child: _isEditingTitle
-                          ? TextField(
-                              controller: _titleController,
-                              autofocus: true,
-                              style: theme.textTheme.titleLarge?.copyWith(
-                                fontWeight: FontWeight.bold,
-                              ),
-                              decoration: const InputDecoration(
-                                border: InputBorder.none,
-                                contentPadding: EdgeInsets.zero,
-                              ),
-                              onSubmitted: (_) => _updateTitle(),
-                              onEditingComplete: _updateTitle,
-                            )
-                          : Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    _document!.title,
-                                    style: theme.textTheme.titleLarge?.copyWith(
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                    maxLines: 2,
-                                    overflow: TextOverflow.ellipsis,
-                                  ),
-                                ),
-                                Icon(
-                                  Icons.edit,
-                                  size: 18,
-                                  color: colorScheme.outline,
-                                ),
-                              ],
-                            ),
-                    ),
-                    const SizedBox(height: 8),
-                    // Timestamp and word count
-                    Row(
-                      children: [
-                        Icon(
-                          Icons.access_time,
-                          size: 14,
-                          color: colorScheme.outline,
+          ],
+        ),
+        body: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              // Title section
+              GestureDetector(
+                onTap: () {
+                  setState(() {
+                    _isEditingTitle = true;
+                  });
+                },
+                child: _isEditingTitle
+                    ? TextField(
+                        controller: _titleController,
+                        autofocus: true,
+                        style: theme.textTheme.headlineSmall?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
-                        const SizedBox(width: 4),
-                        Text(
-                          _formatDate(_document!.createdAt),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.outline,
+                        decoration: InputDecoration(
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(12),
                           ),
+                          contentPadding: const EdgeInsets.all(16),
                         ),
-                        const SizedBox(width: 16),
-                        Icon(
-                          Icons.notes,
-                          size: 14,
-                          color: colorScheme.outline,
-                        ),
-                        const SizedBox(width: 4),
-                        Text(
-                          '${_wordCount(_document!.transcript)} words',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: colorScheme.outline,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-
-          // Content
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // Transcript section
-                  _buildSectionHeader(
-                    context,
-                    'Transcript',
-                    Icons.format_quote,
-                  ),
-                  const SizedBox(height: 12),
-                  Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.all(16),
-                    decoration: BoxDecoration(
-                      color: colorScheme.surfaceContainerLowest,
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(
-                        color: colorScheme.outlineVariant.withOpacity(0.5),
-                      ),
-                    ),
-                    child: SelectableText(
-                      _document!.transcript,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        height: 1.6,
-                        color: colorScheme.onSurface,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-
-                  // Summary section
-                  _buildSectionHeader(
-                    context,
-                    'AI Summary',
-                    Icons.auto_awesome,
-                  ),
-                  const SizedBox(height: 12),
-
-                  if (_summaryError != null) ...[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        color: colorScheme.errorContainer,
-                        borderRadius: BorderRadius.circular(16),
-                      ),
-                      child: Row(
+                        onSubmitted: (_) => _updateTitle(),
+                        onEditingComplete: _updateTitle,
+                      )
+                    : Row(
                         children: [
-                          Icon(
-                            Icons.error_outline,
-                            color: colorScheme.onErrorContainer,
-                          ),
-                          const SizedBox(width: 12),
                           Expanded(
                             child: Text(
-                              _summaryError!,
-                              style: TextStyle(
-                                color: colorScheme.onErrorContainer,
+                              _document!.title,
+                              style: theme.textTheme.headlineSmall?.copyWith(
+                                fontWeight: FontWeight.bold,
                               ),
                             ),
+                          ),
+                          Icon(
+                            Icons.edit,
+                            size: 18,
+                            color: colorScheme.outline,
                           ),
                         ],
                       ),
-                    ),
-                    const SizedBox(height: 12),
-                  ],
-
-                  if (_document!.summary != null) ...[
-                    Container(
-                      width: double.infinity,
-                      padding: const EdgeInsets.all(16),
-                      decoration: BoxDecoration(
-                        gradient: LinearGradient(
-                          begin: Alignment.topLeft,
-                          end: Alignment.bottomRight,
-                          colors: [
-                            colorScheme.primaryContainer.withOpacity(0.5),
-                            colorScheme.tertiaryContainer.withOpacity(0.5),
-                          ],
-                        ),
-                        borderRadius: BorderRadius.circular(16),
-                        border: Border.all(
-                          color: colorScheme.primary.withOpacity(0.3),
-                        ),
-                      ),
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          SelectableText(
-                            _document!.summary!,
-                            style: theme.textTheme.bodyMedium?.copyWith(
-                              height: 1.6,
-                              color: colorScheme.onSurface,
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                  ],
-
-                  // Generate/Regenerate summary button
-                  SizedBox(
-                    width: double.infinity,
-                    child: _isGeneratingSummary
-                        ? Container(
-                            padding: const EdgeInsets.all(16),
-                            decoration: BoxDecoration(
-                              color: colorScheme.surfaceContainerHighest,
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                SizedBox(
-                                  width: 20,
-                                  height: 20,
-                                  child: CircularProgressIndicator(
-                                    strokeWidth: 2,
-                                    color: colorScheme.primary,
-                                  ),
-                                ),
-                                const SizedBox(width: 12),
-                                Text(
-                                  'Generating summary...',
-                                  style: TextStyle(
-                                    color: colorScheme.onSurfaceVariant,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          )
-                        : FilledButton.tonal(
-                            onPressed: _generateSummary,
-                            style: FilledButton.styleFrom(
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 24,
-                                vertical: 16,
-                              ),
-                              shape: RoundedRectangleBorder(
-                                borderRadius: BorderRadius.circular(16),
-                              ),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  Icons.auto_awesome,
-                                  size: 20,
-                                  color: colorScheme.primary,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _document!.summary != null
-                                      ? 'Regenerate Summary'
-                                      : 'Generate Summary (Groq)',
-                                  style: TextStyle(
-                                    color: colorScheme.primary,
-                                    fontWeight: FontWeight.w600,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
+              ),
+              const SizedBox(height: 8),
+              
+              // Timestamp and word count
+              Row(
+                children: [
+                  Icon(
+                    Icons.access_time,
+                    size: 14,
+                    color: colorScheme.outline,
                   ),
-
-                  const SizedBox(height: 48),
+                  const SizedBox(width: 4),
+                  Text(
+                    _formatDate(_document!.createdAt),
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.outline,
+                    ),
+                  ),
+                  const SizedBox(width: 16),
+                  Icon(
+                    Icons.notes,
+                    size: 14,
+                    color: colorScheme.outline,
+                  ),
+                  const SizedBox(width: 4),
+                  Text(
+                    '${_wordCount(_transcriptController.text)} words',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: colorScheme.outline,
+                    ),
+                  ),
                 ],
               ),
-            ),
+              const SizedBox(height: 24),
+
+              // Transcript section
+              Row(
+                children: [
+                  _buildSectionHeader(context, 'Note Content', Icons.format_quote),
+                  const Spacer(),
+                  if (!_isEditingTranscript)
+                    TextButton.icon(
+                      onPressed: _startEditingTranscript,
+                      icon: const Icon(Icons.edit, size: 18),
+                      label: const Text('Edit'),
+                    ),
+                ],
+              ),
+              const SizedBox(height: 12),
+              Container(
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: colorScheme.surfaceContainerLowest,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: _isEditingTranscript 
+                        ? colorScheme.primary 
+                        : colorScheme.outlineVariant.withOpacity(0.5),
+                    width: _isEditingTranscript ? 2 : 1,
+                  ),
+                ),
+                child: _isEditingTranscript
+                    ? TextField(
+                        controller: _transcriptController,
+                        maxLines: null,
+                        minLines: 10,
+                        autofocus: true,
+                        onChanged: (value) {
+                          setState(() {
+                            _hasUnsavedChanges = value != _document!.transcript;
+                          });
+                        },
+                        style: theme.textTheme.bodyLarge?.copyWith(
+                          height: 1.6,
+                          color: colorScheme.onSurface,
+                        ),
+                        decoration: const InputDecoration(
+                          border: InputBorder.none,
+                          contentPadding: EdgeInsets.all(16),
+                          hintText: 'Enter your note...',
+                        ),
+                      )
+                    : Padding(
+                        padding: const EdgeInsets.all(16),
+                        child: SelectableText(
+                          _document!.transcript.isEmpty 
+                              ? 'No content yet. Tap Edit to add text.'
+                              : _document!.transcript,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            height: 1.6,
+                            color: _document!.transcript.isEmpty 
+                                ? colorScheme.outline 
+                                : colorScheme.onSurface,
+                          ),
+                        ),
+                      ),
+              ),
+              const SizedBox(height: 32),
+
+              // Summary section
+              _buildSectionHeader(context, 'AI Summary', Icons.auto_awesome),
+              const SizedBox(height: 12),
+
+              if (_summaryError != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    color: colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(16),
+                  ),
+                  child: Row(
+                    children: [
+                      Icon(
+                        Icons.error_outline,
+                        color: colorScheme.onErrorContainer,
+                      ),
+                      const SizedBox(width: 12),
+                      Expanded(
+                        child: Text(
+                          _summaryError!,
+                          style: TextStyle(
+                            color: colorScheme.onErrorContainer,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 12),
+              ],
+
+              if (_document!.summary != null) ...[
+                Container(
+                  width: double.infinity,
+                  padding: const EdgeInsets.all(16),
+                  decoration: BoxDecoration(
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        colorScheme.primaryContainer.withOpacity(0.5),
+                        colorScheme.tertiaryContainer.withOpacity(0.5),
+                      ],
+                    ),
+                    borderRadius: BorderRadius.circular(16),
+                    border: Border.all(
+                      color: colorScheme.primary.withOpacity(0.3),
+                    ),
+                  ),
+                  child: SelectableText(
+                    _document!.summary!,
+                    style: theme.textTheme.bodyMedium?.copyWith(
+                      height: 1.6,
+                      color: colorScheme.onSurface,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+              ],
+
+              // Generate/Regenerate summary button
+              SizedBox(
+                width: double.infinity,
+                child: _isGeneratingSummary
+                    ? Container(
+                        padding: const EdgeInsets.all(16),
+                        decoration: BoxDecoration(
+                          color: colorScheme.surfaceContainerHighest,
+                          borderRadius: BorderRadius.circular(16),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(
+                                strokeWidth: 2,
+                                color: colorScheme.primary,
+                              ),
+                            ),
+                            const SizedBox(width: 12),
+                            Text(
+                              'Generating summary...',
+                              style: TextStyle(
+                                color: colorScheme.onSurfaceVariant,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : FilledButton.tonal(
+                        onPressed: _transcriptController.text.trim().isEmpty 
+                            ? null 
+                            : _generateSummary,
+                        style: FilledButton.styleFrom(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 24,
+                            vertical: 16,
+                          ),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(16),
+                          ),
+                        ),
+                        child: Row(
+                          mainAxisAlignment: MainAxisAlignment.center,
+                          children: [
+                            Icon(
+                              Icons.auto_awesome,
+                              size: 20,
+                              color: colorScheme.primary,
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              _document!.summary != null
+                                  ? 'Regenerate Summary'
+                                  : 'Generate Summary (Groq)',
+                              style: TextStyle(
+                                color: colorScheme.primary,
+                                fontWeight: FontWeight.w600,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+              ),
+
+              const SizedBox(height: 48),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }

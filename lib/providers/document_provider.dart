@@ -120,6 +120,21 @@ class DocumentProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Updates the transcript of a document.
+  /// 
+  /// [id] - The document ID
+  /// [transcript] - The new transcript text
+  Future<void> updateTranscript(String id, String transcript) async {
+    await _storageService.updateTranscript(id, transcript);
+    
+    final index = _documents.indexWhere((d) => d.id == id);
+    if (index != -1) {
+      _documents[index].transcript = transcript;
+      _applySearch();
+      notifyListeners();
+    }
+  }
+
   /// Generates and saves an AI summary for a document.
   /// 
   /// [id] - The document ID to summarize

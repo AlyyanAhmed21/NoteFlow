@@ -11,7 +11,7 @@ import 'document_detail_screen.dart';
 /// - Search bar for filtering documents
 /// - Pull-to-refresh
 /// - Empty state with illustration
-/// - FAB to start new dictation
+/// - FAB to start new dictation or text note
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
 
@@ -170,13 +170,13 @@ class _HomeScreenState extends State<HomeScreen> {
         ],
       ),
 
-      // FAB for new dictation
+      // FAB for new note options
       floatingActionButton: FloatingActionButton.extended(
-        onPressed: _startDictation,
+        onPressed: _showNewNoteOptions,
         backgroundColor: colorScheme.primary,
         foregroundColor: colorScheme.onPrimary,
         elevation: 4,
-        icon: const Icon(Icons.mic),
+        icon: const Icon(Icons.add),
         label: const Text('New Note'),
       ),
       floatingActionButtonLocation: FloatingActionButtonLocation.centerFloat,
@@ -227,7 +227,7 @@ class _HomeScreenState extends State<HomeScreen> {
                 shape: BoxShape.circle,
               ),
               child: Icon(
-                Icons.mic_none_rounded,
+                Icons.note_add_rounded,
                 size: 64,
                 color: colorScheme.primary,
               ),
@@ -242,7 +242,7 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
             const SizedBox(height: 8),
             Text(
-              'Tap the microphone button below to start\nyour first voice note',
+              'Tap the button below to create your first note\nusing voice or keyboard',
               textAlign: TextAlign.center,
               style: theme.textTheme.bodyLarge?.copyWith(
                 color: colorScheme.onSurfaceVariant,
@@ -304,6 +304,83 @@ class _HomeScreenState extends State<HomeScreen> {
     });
   }
 
+  void _showNewNoteOptions() {
+    final colorScheme = Theme.of(context).colorScheme;
+    
+    showModalBottomSheet(
+      context: context,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) => SafeArea(
+        child: Padding(
+          padding: const EdgeInsets.symmetric(vertical: 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Container(
+                width: 40,
+                height: 4,
+                margin: const EdgeInsets.only(bottom: 20),
+                decoration: BoxDecoration(
+                  color: colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
+                ),
+              ),
+              Text(
+                'Create New Note',
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  fontWeight: FontWeight.bold,
+                ),
+              ),
+              const SizedBox(height: 20),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.mic,
+                    color: colorScheme.primary,
+                  ),
+                ),
+                title: const Text('Voice Note'),
+                subtitle: const Text('Dictate your note using speech-to-text'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _startDictation();
+                },
+              ),
+              const Divider(indent: 72, endIndent: 20),
+              ListTile(
+                leading: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(
+                    Icons.keyboard,
+                    color: colorScheme.secondary,
+                  ),
+                ),
+                title: const Text('Text Note'),
+                subtitle: const Text('Type your note using the keyboard'),
+                onTap: () {
+                  Navigator.pop(context);
+                  _createTextNote();
+                },
+              ),
+              const SizedBox(height: 10),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
   void _startDictation() {
     Navigator.push(
       context,
@@ -314,6 +391,23 @@ class _HomeScreenState extends State<HomeScreen> {
       // Refresh documents when returning
       context.read<DocumentProvider>().loadDocuments();
     });
+  }
+
+  Future<void> _createTextNote() async {
+    // Create a new empty document and open it for editing
+    final document = await context.read<DocumentProvider>().createDocument('');
+    
+    if (mounted) {
+      Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (context) => DocumentDetailScreen(documentId: document.id),
+        ),
+      ).then((_) {
+        // Refresh documents when returning
+        context.read<DocumentProvider>().loadDocuments();
+      });
+    }
   }
 
   void _openDocument(String id) {

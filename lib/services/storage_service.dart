@@ -75,6 +75,18 @@ class StorageService {
     }
   }
 
+  /// Updates the transcript of a document.
+  /// 
+  /// [id] - The document ID
+  /// [transcript] - The new transcript text
+  Future<void> updateTranscript(String id, String transcript) async {
+    final document = _box.get(id);
+    if (document != null) {
+      document.transcript = transcript;
+      await document.save();
+    }
+  }
+
   /// Searches documents by title or transcript content.
   /// 
   /// [query] - The search query
